@@ -30,7 +30,6 @@ IJailbreakApi* jailbreak_api;
 // VARS
 
 bool bFFEnabled = false;
-
 static bool b_CvarLocked = false;
 
 
@@ -95,13 +94,27 @@ void PrintAllPrefixed(const char* content) {
     utils->PrintToChatAll(buf);
 }
 
-
+std::vector<int> GetAliveTerrorists(){
+    std::vector<int> vAliveTerrorists;
+    for (int i = 0;i < MAX_PLAYERS;i++){
+        auto pController = CCSPlayerController::FromSlot(i);
+        if (!pController || pController->GetTeam() != CS_TEAM_T) continue;
+        auto pPawn = pController->GetPlayerPawn();
+        if (pPawn && pPawn->IsAlive()) vAliveTerrorists.push_back(i);
+    }
+    return vAliveTerrorists;
+}
 
 // =========================================
 // OTHER
 // =========================================
 
 void OnBoxGame(int iSlot){
+    if (jailbreak_api->GetWarden() != iSlot) return;
+    if (GetAliveTerrorists().size() <= 1) {
+        PrintSlotPrefixed(iSlot,GetTranslation("Box_NotEnoughPlayers"));
+        return;
+    }
     ConVarRefAbstract* FFCvar = FindConVar("mp_teammates_are_enemies");
     if (FFCvar && bFFEnabled) {
         FFCvar->SetBool(false);
@@ -188,6 +201,7 @@ void jb_games_box::AllPluginsLoaded() {
     LoadTranslations();
 
     jailbreak_api->RegisterGameFeature(g_PLID,"box",GetTranslation("Game_Box"),OnBoxGame);
+
     utils->HookEvent(g_PLID,"round_start",[](const char* szName, IGameEvent* pEvent, bool bDontBroadcast){
         if (bFFEnabled) {
         ConVarRefAbstract* FFCvar = FindConVar("mp_teammates_are_enemies");
@@ -198,6 +212,47 @@ void jb_games_box::AllPluginsLoaded() {
         delete FFCvar;
     }
     }); 
+
+    utils->HookOnTakeDamagePre(g_PLID, [](int iSlot, CTakeDamageInfo *pInfo) {
+        if (!bFFEnabled) return true;
+
+        auto pController = CCSPlayerController::FromSlot(iSlot);
+        if (pController && pController->GetTeam() == CS_TEAM_CT) {
+
+            auto AttackerHandle = pInfo->m_hAttacker.Get();
+
+            if (AttackerHandle.IsValid()) {
+                auto attacker = AttackerHandle.Get();
+
+                if (attacker) {
+                    auto AttackerEntity = (CBaseEntity*)attacker;
+
+                    if (AttackerEntity) {
+                        if (AttackerEntity->GetTeam() == CS_TEAM_CT) return false;
+                    }
+                }
+            }
+        }
+
+
+        return true;
+    });
+
+    utils->HookEvent(g_PLID,"player_death",[](const char* szName, IGameEvent* pEvent, bool bDontBroadcast){
+        if (bFFEnabled) {
+            std::vector<int> vAliveT = GetAliveTerrorists();
+
+            if (vAliveT.size() <= 1) {
+                ConVarRefAbstract* FFCvar = FindConVar("mp_teammates_are_enemies");
+                if (FFCvar){
+                    bFFEnabled = false;
+                    FFCvar->SetBool(false);
+                    delete FFCvar;
+                }
+
+            }
+        }
+    });
 
     utils->StartupServer(g_PLID, StartupServer);
 
@@ -221,4 +276,4 @@ const char* jb_games_box::GetLicense() { return "Private"; }
 const char* jb_games_box::GetLogTag() { return "[JB] Game Box"; }
 const char* jb_games_box::GetName() { return "[JB] Game Box"; }
 const char* jb_games_box::GetURL() { return "https://t.me/niffox_2q"; }
-const char* jb_games_box::GetVersion() { return "1.0.0"; }
+const char* jb_games_box::GetVersion() { return "1.0.1"; }
